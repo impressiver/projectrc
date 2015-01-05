@@ -1,0 +1,7 @@
+#
+# Sub-project activation script: executed when project is synced from within
+# this directory
+#
+
+echo
+echo "${BOLD}${RED}Take your Autobots and leave Cybertron forever.${RESET}"

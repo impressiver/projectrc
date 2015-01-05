@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-#
-# Default projectrc init script
-#
-
-echo "Initializing ${PROJECT}"

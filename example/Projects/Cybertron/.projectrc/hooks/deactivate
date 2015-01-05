@@ -1,0 +1,7 @@
+#
+# Deactivation script: executed when project changes from active to inactive
+#
+
+echo
+echo "${BOLD}With the Allspark gone, we cannot return life to our planet."
+echo "But fate has yielded its own reward: a new world to call home.${RESET}"

@@ -1,0 +1,32 @@
+#
+# Homebrew formula helpers
+#
+
+function brewery() {
+  local repo=$1
+  local formula=$2
+  local title=${3:-$formula}
+  local args=$4
+
+  if [[ ! "$(brew )" == *$formula* ]]; then
+    echo "Installing $title"
+    $repo install $formula $args
+
+    return $TRUE
+  else
+    echo "$title already installed"
+    return $FALSE
+  fi
+
+  return $FALSE
+}
+
+# Homebrew installer
+function brew-install() {
+  brewery 'brew' $@
+}
+
+# Cask installer (Applications)
+function install_cask() {
+  brewery 'brew cask' $@
+}

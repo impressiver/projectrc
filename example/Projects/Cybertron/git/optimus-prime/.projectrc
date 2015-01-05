@@ -1,0 +1,7 @@
+#
+# Sub-project activation script: executed when project is synced from within
+# this directory
+#
+
+echo
+echo "${BOLD}${GREEN}This is our home, Megatron. We will stay, we will fight, and we will win.${RESET}"

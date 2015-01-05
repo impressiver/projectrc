@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+
+function usage() {
+  echo "${PURPLE}projectrc${RESET}"
+  echo
+  echo "Usage: ${ORANGE}projectrc [init|activate|deactivate [<project>]]"
+  echo "                 [config|status]${RESET}"
+  echo
+  echo "Examples:"
+  echo "  ${ORANGE}projectrc init${RESET}                           Create or update project in the current directory"
+  echo "  ${ORANGE}projectrc init Megatron${RESET}                  Create new project named \"Megatron\""
+  echo "  ${ORANGE}projectrc activate${RESET}                       (Re)activate project associated with the current path"
+  echo "  ${ORANGE}projectrc activate OptimusPrime${RESET}          Jump to \"OptimusPrime\" and run environment setup"
+  echo "  ${ORANGE}projectrc deactivate${RESET}                     Deactivate the currently active project"
+  echo "  ${ORANGE}projectrc config --projects-home${RESET}         Get $PROJECTS_HOME path"
+  echo "  ${ORANGE}projectrc config --projects-home=<path>${RESET}  Set $PROJECTS_HOME path"
+}
+
+function activate() {
+  # Short circuit if no projects path is set
+  if [ -z "$PROJECTS_HOME" ]; then
+    echo "${RED}Missing configuration for \$PROJECTS_HOME${RESET}"
+    echo
+    usage
+    exit 1
+  fi
+
+  local this_dir="$PWD"
+  local target_dir="${PROJECTS_HOME}/$@"
+
+  local active_dir parent_dir project_name project_dir
+
+  # Currently active project path
+  [ "$PROJECT" ] && active_dir="${PROJECTS_HOME}/${PROJECT}"
+
+  # If executed w/o args...
+  if [ -z "$@" ]; then
+    if [ "$this_dir" == "$PROJECTS_HOME"* ]; then
+      target_dir="$this_dir"
+    else
+      # TODO: (IW) Even though activate was called from outside the project path,
+      # why not walk the path and see if there's a .projectrc anyway?
+      echo "For your security, projectrc will only activate projects kept within $PROJECTS_HOME"
+      return 1
+    fi
+  fi
+
+  parent_dir="$(dirname "${target_dir}")"
+
+  if [ "$parent_dir" == "$PROJECTS_HOME" ]; then
+    # The project name is the current directory name
+    project_name=$(basename "${target_dir}")
+  else
+    # Extract project name from the path
+    project_name=${parent_dir#"$PROJECTS_HOME/"}
+    project_name=${project_name%%/*}
+  fi
+
+  project_dir="${PROJECTS_HOME}/${project_name}"
+
+  # Project already active
+  if [ "$PROJECT" ] && [ "$PROJECT" == "${project_name}" ]; then
+    echo "${PROJECT} already active, maybe you meant ${ORANGE}projectrc sync${RESET}?"
+    # usage
+    exit 0
+  fi
+
+  # Deactivate previous project
+  [ "$PROJECT" ] && deactivate
+
+  echo "${PURPLE}Activating ${project_name}${RESET}"
+
+  # If called from outside the project path, jump to project root
+  if [[ "$parent_dir" != "$PROJECTS_HOME"* ]]; then
+    builtin cd "${project_dir}"
+  fi
+
+  # Export the active project name and path
+  export PROJECT="$project_name"
+  export PROJECT_HOME="${project_dir}"
+  # Set project home, unless it was already set
+  # export PROJECT_HOME="${PROJECT_HOME:-project_dir}"
+
+  # Load project bash history
+  history -a # append new entries to current history file before swapping
+  local hist_dir="${project_dir}/.projectrc"
+  if [ ! -d "$hist_dir" ]; then
+    mkdir -p "$hist_dir" # create directory if needed
+  fi
+  export HISTFILE="${hist_dir}/.bash_history" # set new history file
+  history -c # clear memory
+  history -r # load project histfile
+
+  # Run project activation hook
+  if [ -f "${project_dir}/.projectrc/hooks/activate" ]; then
+    . "${project_dir}/.projectrc/hooks/activate"
+  fi
+
+  # Run sub-project script
+  sync
+}
+
+# Walk up the active project path and execute the first (non-directory)
+# .projectrc script found
+function sync() {
+  local this_dir="$PWD"
+  local parent_dir="$(dirname "${this_dir}")"
+
+  # Short circuit if there is no active project, or not currently inside the
+  # active project path
+  if [ -z "$PROJECT" ] || [[ "$parent_dir" != "$PROJECTS_HOME"* ]]; then
+    return 0
+  fi
+
+  local this_dir="$PWD"
+  local walk_dir="$this_dir"
+  local project_rc
+
+  # Walk up to the project root looking for a '.projectrc' file
+  while [[ -z "$project_rc" && "$walk_dir" == "${PROJECT_HOME}"* ]]; do
+    # Check for a .projectrc file and then move up a directory
+    if [ -e "${walk_dir}/.projectrc" ]; then
+      project_rc="${walk_dir}/.projectrc"
+    fi
+    walk_dir=$(dirname "$walk_dir")
+  done
+
+  # Run sub-project script, if one was found
+  if [ -f "$project_rc" ]; then
+    . "$project_rc"
+  fi
+}
+
+function deactivate() {
+  # Short circuit if there is no active project
+  if [ -z "$PROJECT" ]; then
+    echo "${RED}Nothing to deactivate${RESET}"
+    echo
+    usage # print help menu
+    return 0
+  fi
+
+  echo "${PURPLE}Deactivating ${PROJECT}${RESET}"
+
+  local default_histfile="${HOME}/.bash_history"
+
+  # Run project deactivation hook
+  if [ -f "${PROJECT_HOME}/.projectrc/hooks/deactivate" ]; then
+    . "${PROJECT_HOME}/.projectrc/hooks/deactivate"
+  fi
+
+  # Load default bash history
+  if [ "$HISTFILE" != "${DEFAULT_HISTFILE:-default_histfile}" ]; then
+    history -a # append new entries to current history file before swapping
+    export HISTFILE="${DEFAULT_HISTFILE:-default_histfile}"
+    history -c # clear memory
+    history -r # load default histfile
+  fi
+
+  # Clear the active project name
+  unset PROJECT
+  unset PROJECT_HOME
+}

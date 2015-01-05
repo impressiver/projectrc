@@ -1,0 +1,42 @@
+# Jump to a project directory and activate project environment
+function cdp() {
+  builtin cd "$@"
+  projectrc activate
+}
+
+# Bash completion for projects
+_cdp() {
+  # Short circuit if no projects dir is set
+  if [ -z "$PROJECTS_HOME" ]; then
+    return 1
+  fi
+    
+  local cur quoted i j k
+  local wdir="$PROJECTS_HOME"
+
+  _get_comp_words_by_ref cur
+  _quote_readline_by_ref "$wdir/$cur" quoted
+
+  _compopt_o_filenames
+
+  local -r mark_dirs=$(_rl_enabled mark-directories && echo y)
+  local -r mark_symdirs=$(_rl_enabled mark-symlinked-directories && echo y)
+
+  k="${#COMPREPLY[@]}"
+  for j in $( compgen -d $quoted ); do
+    if [[ ( $mark_symdirs && -h $j || $mark_dirs && ! -h $j ) && ! -d ${j#$wdir/} ]]; then
+      j="${j}/"
+    fi
+    COMPREPLY[k++]=${j#$wdir/}
+  done
+
+  if [[ ${#COMPREPLY[@]} -eq 1 ]]; then
+    i=${COMPREPLY[0]}
+    if [[ "$i" == "$cur" && $i != "*/" ]]; then
+      COMPREPLY[0]="${i}/"
+    fi
+  fi
+
+  return 0
+}
+complete -F _cdp -o nospace cdp

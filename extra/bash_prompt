@@ -1,13 +1,18 @@
+# Impressiver’s projectrc prompt, modified from...
 # @gf3’s Sexy Bash Prompt, inspired by “Extravagant Zsh Prompt”
 # Shamelessly copied from https://github.com/gf3/dotfiles
 # Screenshot: http://i.imgur.com/s0Blh.png
 
-if [[ $COLORTERM = gnome-* && $TERM = xterm ]] && infocmp gnome-256color >/dev/null 2>&1; then
-  export TERM=gnome-256color
-elif [[ $TERM != dumb ]] && infocmp xterm-256color >/dev/null 2>&1; then
-  export TERM=xterm-256color
+# Set the terminal compatibility
+if [ ! "$TERM" ]; then
+  if [[ $COLORTERM = gnome-* && $TERM = xterm ]] && infocmp gnome-256color >/dev/null 2>&1; then
+    export TERM=gnome-256color
+  elif [[ $TERM != dumb ]] && infocmp xterm-256color >/dev/null 2>&1; then
+    export TERM=xterm-256color
+  fi
 fi
 
+# Set the palette
 if tput setaf 1 &> /dev/null; then
   tput sgr0
   if [[ $(tput colors) -ge 256 ]] 2>/dev/null; then
@@ -35,26 +40,22 @@ else
   RESET="\033[m"
 fi
 
-export MAGENTA
-export ORANGE
-export GREEN
-export PURPLE
-export WHITE
-export BOLD
-export RESET
-
+# Print an icon if the current directory is a git repo and there are local changes
 function parse_git_dirty() {
   # U+26A1 HIGH VOLTAGE SIGN (⚡)
   [[ -n $(git branch 2> /dev/null) ]] && [[ $(git status 2> /dev/null | tail -n1) != *"working directory clean"* ]] && echo " ⚡"
 }
 
+# Print the branch name if the current directory is a git repo
 function parse_git_branch() {
   [[ -n $(git branch 2> /dev/null) ]] && git branch --no-color 2> /dev/null | sed -e '/^[^*]/d' -e "s/* \(.*\)/ \1/"
 }
 
+# Print repo name if the current directory is a git repo
 function parse_project() {
   echo "${PROJECT:-$(basename "$(git rev-parse --show-toplevel 2> /dev/null)")}"
 }
 
+# Nerd up the bash prompt
 export PS1="\[${BOLD}${MAGENTA}\]\u \[$WHITE\]at \[$ORANGE\]\h \[$WHITE\]in \[$ORANGE\]\w\[$WHITE\]\$([ \$(parse_project) ] && echo \" on \")\[$PURPLE\]\$(parse_project)\[$GREEN\]\$(parse_git_branch)\[$WHITE\]\$(parse_git_dirty)\n\$ \[$RESET\]"
 export PS2="\[$ORANGE\]→ \[$RESET\]"

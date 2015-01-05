@@ -1,0 +1,6 @@
+#
+# Activation script: executed when project changes from inactive to active
+#
+
+echo
+echo "${BLUE}Our planet was once a powerful empire, peaceful and just, until we were betrayed by Megatron, leader of the Decepticons.${RESET}"
