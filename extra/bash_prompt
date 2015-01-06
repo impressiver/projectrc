@@ -1,7 +1,20 @@
 # Impressiver’s projectrc prompt, modified from...
 # @gf3’s Sexy Bash Prompt, inspired by “Extravagant Zsh Prompt”
 # Shamelessly copied from https://github.com/gf3/dotfiles
-# Screenshot: http://i.imgur.com/s0Blh.png
+
+# Also see: http://mywiki.wooledge.org/BashFAQ/037
+
+# Test all available term colors
+function taste-the-rainbow() {
+  echo "`printf %$((${COLUMNS}/2-12))s`Using 'tput' `printf %$((${COLUMNS}/2-19))s`Using ASCII '\\e'"
+  ( x1=`tput op` x2=$"\e[0m" y=`printf %$((${COLUMNS}/2-4))s`
+    for i in {0..256}; do
+      o=00$i;
+      echo -e ${o:${#o}-3:3} `tput setaf $i; tput setab $i`${y// /=} $x1 $"\e[48;5;${i}m\e[38;5;${i}m"${y// /=} $x2
+    done
+  )
+  echo
+}
 
 # Set the terminal compatibility
 if [ ! "$TERM" ]; then
@@ -21,12 +34,16 @@ if tput setaf 1 &> /dev/null; then
     GREEN=$(tput setaf 190)
     PURPLE=$(tput setaf 141)
     WHITE=$(tput setaf 0)
+    RED=$(tput setaf 124)
+    YELLOW=$(tput setaf 214)
   else
     MAGENTA=$(tput setaf 5)
     ORANGE=$(tput setaf 4)
     GREEN=$(tput setaf 2)
     PURPLE=$(tput setaf 1)
     WHITE=$(tput setaf 7)
+    RED=$(tput setaf 1)
+    YELLOW=$(tput setaf 3)
   fi
   BOLD=$(tput bold)
   RESET=$(tput sgr0)
@@ -36,6 +53,8 @@ else
   GREEN="\033[1;32m"
   PURPLE="\033[1;35m"
   WHITE="\033[1;37m"
+  RED="\033[1;31m"
+  YELLOW="\033[1;33m"
   BOLD=""
   RESET="\033[m"
 fi

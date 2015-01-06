@@ -1,0 +1,9 @@
+[project]
+name="Cybertron"
+home="${PROJECTS_HOME}/Cybertron"
+projectrc="${PROJECT_HOME}/.projectrc"
+parent=true
+
+[children]
+path=/git
+sync=true

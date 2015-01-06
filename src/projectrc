@@ -1,51 +1,84 @@
 #!/usr/bin/env bash
 
+#
+# Usage
+#
+
 function usage() {
-  echo "${PURPLE}projectrc${RESET}"
-  echo
-  echo "Usage: ${ORANGE}projectrc [init|activate|deactivate [<project>]]"
-  echo "                 [config|status]${RESET}"
+  echo "Usage: ${ORANGE}$0 [-c] [init|activate|deactivate|sync [<project>]]"
+  echo "                 [list|config|status] [--config=<path>]${RESET}"
   echo
   echo "Examples:"
-  echo "  ${ORANGE}projectrc init${RESET}                           Create or update project in the current directory"
-  echo "  ${ORANGE}projectrc init Megatron${RESET}                  Create new project named \"Megatron\""
-  echo "  ${ORANGE}projectrc activate${RESET}                       (Re)activate project associated with the current path"
-  echo "  ${ORANGE}projectrc activate OptimusPrime${RESET}          Jump to \"OptimusPrime\" and run environment setup"
-  echo "  ${ORANGE}projectrc deactivate${RESET}                     Deactivate the currently active project"
-  echo "  ${ORANGE}projectrc config --projects-home${RESET}         Get $PROJECTS_HOME path"
-  echo "  ${ORANGE}projectrc config --projects-home=<path>${RESET}  Set $PROJECTS_HOME path"
+  echo "  ${ORANGE}projectrc list${RESET}                                 List available projects"
+  echo "  ${ORANGE}projectrc init${RESET}                                 Create or update project from the current directory"
+  echo "  ${ORANGE}projectrc init Cybertron${RESET}                       Create project named \"Cybertron\" in \$PROJECT_HOME"
+  echo "  ${ORANGE}projectrc activate${RESET}                             Activate project from within project path"
+  echo "  ${ORANGE}projectrc activate Cybertron${RESET}                   Jump to \"Cybertron\" project root and activate"
+  echo "  ${ORANGE}projectrc sync${RESET}                                 (Re)execute closest '.projectrc' from within an active project subdirectory"
+  echo "  ${ORANGE}projectrc sync git/megatron${RESET}                    (Re)execute closest '.projectrc' from '\$PROJECT_HOME/git/megatron'"
+  echo "  ${ORANGE}projectrc deactivate${RESET}                           Deactivate currently active project"
+  echo "  ${ORANGE}projectrc status${RESET}                               Show details about the current environment state/settings"
+  echo "  ${ORANGE}projectrc config projects-home${RESET}                 Get configured base path used for creating/managing projects"
+  echo "  ${ORANGE}projectrc config projects-home=\"~/Projects\"${RESET}    Set projects path to '~/Projects'"
 }
 
-function activate() {
-  # Short circuit if no projects path is set
-  if [ -z "$PROJECTS_HOME" ]; then
-    echo "${RED}Missing configuration for \$PROJECTS_HOME${RESET}"
-    echo
-    usage
-    exit 1
+
+#
+# Env
+#
+
+DEFAULT_CONFIG="${HOME}/.projectrc/config"
+DEFAULT_HISTFILE="${HISTFILE:-${HOME}/.bash_history}"
+
+declare -A config
+
+#
+# Helpers
+#
+
+# Read config file with the expected format:
+# ------------
+# [global]
+# prop_one=abc
+# prop_two=123
+#
+# [section]
+# prop_one=def
+# prop_two=456
+# ...
+function read_config() {
+  local config_file="${@:-$DEFAULT_CONFIG}"
+
+  # Make sure the path exists and is a regular file
+  if [ ! -e "${config_file}" ] || [ ! -f "${config_file}" ]; then
+    echo "${RED}Invalid config path:${RESET} '${config_file}' is missing or not a regular file"
+    return 2
   fi
 
-  local this_dir="$PWD"
-  local target_dir="${PROJECTS_HOME}/$@"
+  # Parse config file into dot-notated associative array
+  while read line; do
+    local block
 
-  local active_dir parent_dir project_name project_dir
-
-  # Currently active project path
-  [ "$PROJECT" ] && active_dir="${PROJECTS_HOME}/${PROJECT}"
-
-  # If executed w/o args...
-  if [ -z "$@" ]; then
-    if [ "$this_dir" == "$PROJECTS_HOME"* ]; then
-      target_dir="$this_dir"
-    else
-      # TODO: (IW) Even though activate was called from outside the project path,
-      # why not walk the path and see if there's a .projectrc anyway?
-      echo "For your security, projectrc will only activate projects kept within $PROJECTS_HOME"
-      return 1
+    if [[ $line =~ ^"["(.+)"]"$ ]]; then
+      # Matched a new block (eg '[project]')
+      block=${BASH_REMATCH[1]}
+    elif [[ $line =~ ^([_[:alpha:]][_[:alnum:]]*)"="(.*) ]]; then
+      # Matched a new config property (eg 'property=value')
+      local prop=${BASH_REMATCH[1]}
+      local val="${BASH_REMATCH[2]}"
+      if [ ! $block ]; then
+        echo "${ORANGE}'${prop}' outside of a block declaration (eg '[global]'), skipping${RESET}"
+        continue
+      fi
+      # Store in dot-notated keys (eg. 'config[project.name]')
+      config[$"${block}.${prop}"]="$val"
     fi
-  fi
+  done < $config_file
+}
 
-  parent_dir="$(dirname "${target_dir}")"
+function parse_project_name() {
+  local target_dir="$@"
+  local parent_dir="$(dirname "${target_dir}")"
 
   if [ "$parent_dir" == "$PROJECTS_HOME" ]; then
     # The project name is the current directory name
@@ -56,18 +89,76 @@ function activate() {
     project_name=${project_name%%/*}
   fi
 
-  project_dir="${PROJECTS_HOME}/${project_name}"
+  echo "$project_name"
+}
 
-  # Project already active
-  if [ "$PROJECT" ] && [ "$PROJECT" == "${project_name}" ]; then
-    echo "${PROJECT} already active, maybe you meant ${ORANGE}projectrc sync${RESET}?"
-    # usage
-    exit 0
+# Load project bash history, or default histfile if called w/ no args
+function load_histfile() {
+  local histfile="${@:-$DEFAULT_HISTFILE}"
+  local hist_dir="$(dirname "${histfile}")"
+
+  history -a # append new entries to current history file before swapping
+  if [ ! -d "$hist_dir" ] && [ "$@" ]; then
+    mkdir -p "$hist_dir" # create project directory if needed
+  fi
+  export HISTFILE="${histfile}" # set new history file
+  history -c # clear memory
+  history -r # load project histfile
+}
+
+
+#
+# Commands
+#
+
+function activate() {
+  # Short circuit if no projects path is set
+  if [ -z "$PROJECTS_HOME" ]; then
+    echo "${RED}Please configure \$PROJECTS_HOME${RESET}"
+    echo
+    usage
+    exit 1
   fi
 
-  # Deactivate previous project
-  [ "$PROJECT" ] && deactivate
+  local this_dir="$PWD"
+  local target_dir="${PROJECTS_HOME}/$@"
+  local parent_dir="$(dirname "${target_dir}")"
 
+  local active_dir parent_dir project_name project_dir
+
+  # Currently active project path
+  [ "$PROJECT" ] && active_dir="${PROJECTS_HOME}/${PROJECT}"
+
+  # If executed w/o args...
+  if [ -z "$@" ]; then
+    if [ "$this_dir" == "$PROJECTS_HOME"* ]; then
+      # Current directory is inside a projects path, activate that project
+      target_dir="$this_dir"
+    else
+      # TODO: (IW) Even though activate was called from outside the project path,
+      # why not walk the path and see if there's a .projectrc anyway?
+      echo "Activate must be called from inside a project path, or one passed in as an argument"
+      usage
+      return 1
+    fi
+  fi
+
+  # Resolve project name and base path
+  project_name="$( parse_project_name "$target_dir" )"
+  project_dir="${PROJECTS_HOME}/${project_name}"
+
+  # Check for existing active project
+  if [ "$PROJECT" ]; then
+    # Don't activate if already active
+    if [ "$PROJECT" == "${project_name}" ]; then
+      echo "${PROJECT} already active, maybe you meant ${ORANGE}projectrc sync${RESET}?"
+      exit 0
+    fi
+
+    deactivate # deactivate previous project
+  fi
+
+  # Activate project
   echo "${PURPLE}Activating ${project_name}${RESET}"
 
   # If called from outside the project path, jump to project root
@@ -75,39 +166,31 @@ function activate() {
     builtin cd "${project_dir}"
   fi
 
-  # Export the active project name and path
+  # load project histfile
+  load_histfile "${project_dir}/.projectrc/bash_history"
+
+  # Export the active project name and base path
   export PROJECT="$project_name"
   export PROJECT_HOME="${project_dir}"
   # Set project home, unless it was already set
   # export PROJECT_HOME="${PROJECT_HOME:-project_dir}"
-
-  # Load project bash history
-  history -a # append new entries to current history file before swapping
-  local hist_dir="${project_dir}/.projectrc"
-  if [ ! -d "$hist_dir" ]; then
-    mkdir -p "$hist_dir" # create directory if needed
-  fi
-  export HISTFILE="${hist_dir}/.bash_history" # set new history file
-  history -c # clear memory
-  history -r # load project histfile
 
   # Run project activation hook
   if [ -f "${project_dir}/.projectrc/hooks/activate" ]; then
     . "${project_dir}/.projectrc/hooks/activate"
   fi
 
-  # Run sub-project script
+  # Run closest '.projectrc' script
   sync
 }
 
 # Walk up the active project path and execute the first (non-directory)
-# .projectrc script found
+# '.projectrc' script found
 function sync() {
   local this_dir="$PWD"
   local parent_dir="$(dirname "${this_dir}")"
 
-  # Short circuit if there is no active project, or not currently inside the
-  # active project path
+  # Short circuit if no project is active, or outside active project path
   if [ -z "$PROJECT" ] || [[ "$parent_dir" != "$PROJECTS_HOME"* ]]; then
     return 0
   fi
@@ -137,27 +220,125 @@ function deactivate() {
     echo "${RED}Nothing to deactivate${RESET}"
     echo
     usage # print help menu
-    return 0
+    exit 1
   fi
 
   echo "${PURPLE}Deactivating ${PROJECT}${RESET}"
-
-  local default_histfile="${HOME}/.bash_history"
 
   # Run project deactivation hook
   if [ -f "${PROJECT_HOME}/.projectrc/hooks/deactivate" ]; then
     . "${PROJECT_HOME}/.projectrc/hooks/deactivate"
   fi
 
-  # Load default bash history
-  if [ "$HISTFILE" != "${DEFAULT_HISTFILE:-default_histfile}" ]; then
-    history -a # append new entries to current history file before swapping
-    export HISTFILE="${DEFAULT_HISTFILE:-default_histfile}"
-    history -c # clear memory
-    history -r # load default histfile
-  fi
+  # Load the default histfile
+  load_histfile
 
   # Clear the active project name
   unset PROJECT
   unset PROJECT_HOME
 }
+
+
+#
+# Parse option flags
+#
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 2
+fi
+
+CMD_ARGS=()
+
+# Declare num args expected w/ long options (default: none)
+declare -A longoptspec
+longoptspec=( [config]=1 )
+
+# Options followed by ":" require a value to be passed in (eg. `-a 123`)
+# The leading ":" suppresses error messages
+optspec=":c:-:h"
+
+while [ $# -gt 0 ]; do
+  echo "args: $@"
+  while [[ "$1" != $'-'* ]]; do
+    CMD_ARGS+=("$1")
+    shift
+  done
+
+  while getopts $optspec opt; do
+    while true; do
+      case $opt in
+        -)  # parse long opts (eg `--config=/path/to/config`)
+          if [[ "${OPTARG}" =~ .*=.* ]]; then  # '--key=value' is always one argument
+            opt=${OPTARG/=*/}
+            OPTARG=${OPTARG#*=}
+            ((OPTIND--))
+          else # '--key value1 value2' allows for multiple arguments
+            opt="$OPTARG"
+            OPTARG=(${@:OPTIND:$((longoptspec[$opt]))})
+          fi
+          ((OPTIND+=longoptspec[$opt]))
+
+          # now that opt/OPTARG are set, re-process opts as if getopts understood
+          # long options
+          continue
+          ;;
+        c|config)
+          OPT_CONFIG="$OPTARG"
+          shift $((OPTIND-1))
+          ;;
+        h)  # show help
+          usage
+          exit 0
+          ;;
+        \?) #unrecognized option - show help
+          echo -e \\n"${RED}Unrecognized option '-$OPTARG'${RESET}"
+          usage
+          exit 2
+          ;;
+      esac
+      break;
+    done
+    # shift $((OPTIND-1))  #This tells getopts to move on to the next argument.
+  done
+done
+
+
+#
+# Parse command args
+#
+
+# Read global config
+read_config "${OPT_CONFIG:-$DEFAULT_CONFIG}"
+# Read active project config
+[ "$PROJECT" ] && read_config "${PROJECT_HOME}/.projectrc/config"
+
+# The command is the first item, the rest are sent as command args
+cmd=("${CMD_ARGS[@]:1}")
+
+case "$cmd" in
+  init|activate|deactivate)
+    $cmd "${CMD_ARGS}"
+    exit 0
+    ;;
+  config)
+    $cmd "${CMD_ARGS}"
+    exit 0
+    ;;
+  list|status)
+    $cmd
+    exit 0
+    ;;
+  help)  #show help
+    usage
+    exit 0
+    ;;
+  \?) #unrecognized option - show help
+    echo -e \\n"${RED}Unrecognized command '$ARG_CMD'${RESET}"
+    usage
+    exit 2
+    ;;
+  *)
+    usage
+    exit 1
+esac
